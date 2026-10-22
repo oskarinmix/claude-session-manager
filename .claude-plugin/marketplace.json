@@ -1,5 +1,6 @@
 {
   "name": "claude-session-manager",
+  "description": "A Claude Code mod for browsing, recapping, renaming, compacting and deleting saved sessions.",
   "owner": { "name": "Oscar Ceballos" },
   "plugins": [{ "name": "session-manager", "source": "./" }]
 }
