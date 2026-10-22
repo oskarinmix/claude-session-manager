@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" width="1000" height="612" viewBox="0 0 1000 612" role="img" aria-label="The Sessions pane open beside a Claude Code conversation">
+  <style>
+    text { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace; font-size: 13px; fill: #d7dbe0; white-space: pre; }
+    .dim { fill: #7c8594; }
+    .cyan { fill: #56c7d6; }
+    .green { fill: #6cc979; }
+    .yellow { fill: #e3c063; }
+    .red { fill: #ef6b6b; }
+    .mag { fill: #d38be6; }
+    .b { font-weight: 700; }
+    .i { font-style: italic; }
+    .btn { fill: #e8eaee; }
+    .key { fill: #d97757; font-weight: 700; }
+    .pri { fill: #11141a; font-weight: 700; }
+  </style>
+
+  <!-- window -->
+  <rect width="1000" height="612" rx="12" fill="#14171d"/>
+  <rect x="0.5" y="0.5" width="999" height="611" rx="12" fill="none" stroke="#2c323d"/>
+  <path d="M12 0.5 h976 a11.5 11.5 0 0 1 11.5 11.5 V36 H0.5 V12 A11.5 11.5 0 0 1 12 0.5 z" fill="#1c2028"/>
+  <circle cx="22" cy="18" r="6" fill="#ec6a5e"/>
+  <circle cx="42" cy="18" r="6" fill="#f4bf4f"/>
+  <circle cx="62" cy="18" r="6" fill="#61c554"/>
+  <text x="500" y="22" text-anchor="middle" class="dim">claude — ~/code/api</text>
+
+  <!-- conversation side -->
+  <text x="24" y="76"><tspan class="dim">❯</tspan> /sessions</text>
+  <text x="24" y="104"><tspan class="green">⏺</tspan> Opened the Sessions pane.</text>
+  <text x="24" y="132"><tspan class="dim">❯</tspan> what did I finish in the auth</text>
+  <text x="24" y="153">  refactor yesterday?</text>
+  <text x="24" y="181"><tspan class="green">⏺</tspan> The recap in the pane says the</text>
+  <text x="24" y="202">  key storage moved to the vault</text>
+  <text x="24" y="223">  and rotation on login landed.</text>
+  <rect x="20" y="536" width="352" height="40" rx="8" fill="none" stroke="#3a4250"/>
+  <text x="34" y="561" class="dim">❯ Type a message…</text>
+  <line x1="384" y1="44" x2="384" y2="600" stroke="#2c323d"/>
+
+  <!-- pane -->
+  <rect x="396" y="48" width="592" height="548" rx="10" fill="none" stroke="#56c7d6" stroke-width="1.5"/>
+
+  <text x="412" y="76"><tspan class="cyan b">◆ This project</tspan> <tspan class="dim">7 sessions · 18.4 MB</tspan></text>
+  <rect x="890" y="61" width="84" height="21" rx="4" fill="#262c36"/>
+  <text x="900" y="76"><tspan class="key">r</tspan><tspan class="btn"> Refresh</tspan></text>
+
+  <text x="412" y="100"><tspan class="dim">2 empty (no conversation)</tspan></text>
+  <rect x="616" y="85" width="122" height="21" rx="4" fill="#262c36"/>
+  <text x="626" y="100"><tspan class="key">e</tspan><tspan class="btn"> Delete empty</tspan></text>
+
+  <text x="412" y="132"><tspan class="green">● </tspan>README polish + images            <tspan class="dim">1.2 MB · 3m ago</tspan><tspan class="green"> · current</tspan></text>
+  <rect x="404" y="140" width="576" height="21" rx="3" fill="#2a2233"/>
+  <text x="412" y="155"><tspan class="mag">▸ </tspan><tspan class="yellow">✓ </tspan><tspan class="mag b">Auth refactor for API keys</tspan>      <tspan class="red">6.3 MB</tspan><tspan class="dim"> · 2h ago</tspan></text>
+  <text x="412" y="178">  <tspan class="yellow">✓ </tspan>Fix pane focus bug              <tspan class="yellow">2.8 MB</tspan><tspan class="dim"> · 1d ago</tspan></text>
+  <text x="412" y="201">  Session list sorting              <tspan class="dim">640 KB · 3d ago</tspan></text>
+  <text x="412" y="224">  Marketplace setup                 <tspan class="dim">212 KB · 6d ago</tspan></text>
+
+  <text x="412" y="256" class="yellow">✓ 2 marked: Auth refactor for API keys, Fix pane focus bug</text>
+  <rect x="412" y="266" width="196" height="21" rx="4" fill="#d97757"/>
+  <text x="422" y="281"><tspan class="pri">n Join as new session</tspan></text>
+  <rect x="616" y="266" width="120" height="21" rx="4" fill="#262c36"/>
+  <text x="626" y="281"><tspan class="key">x</tspan><tspan class="btn"> Clear marks</tspan></text>
+
+  <!-- detail box -->
+  <rect x="408" y="302" width="568" height="236" rx="8" fill="none" stroke="#d38be6" stroke-width="1.2"/>
+  <text x="424" y="326" class="mag b">Auth refactor for API keys</text>
+  <text x="424" y="346" class="dim">3f9c2a1e-8b41-4c0d-9e2a-71d5c0a4be19 · ~/code/api</text>
+  <text x="424" y="366"><tspan class="red">6.3 MB</tspan><tspan class="dim"> · last active 2h ago</tspan></text>
+  <text x="424" y="386" class="dim i">“move key storage to the vault and rotate on login”</text>
+  <text x="424" y="414" class="yellow b">Recap</text>
+  <text x="424" y="434">- Moved API key storage into the vault service</text>
+  <text x="424" y="454">- Added key rotation on login plus a migration script</text>
+  <text x="424" y="474">- Open: tests for expired keys still fail</text>
+  <text x="424" y="500" class="dim">Rename</text>
+  <rect x="484" y="486" width="300" height="21" rx="4" fill="none" stroke="#3a4250"/>
+  <text x="494" y="501" class="dim">Auth refactor for API keys</text>
+  <rect x="792" y="486" width="52" height="21" rx="4" fill="#262c36"/>
+  <text x="804" y="501" class="btn">Save</text>
+
+  <rect x="424" y="512" width="80" height="21" rx="4" fill="#d97757"/>
+  <text x="434" y="527"><tspan class="pri">o Resume</tspan></text>
+  <rect x="512" y="512" width="112" height="21" rx="4" fill="#262c36"/>
+  <text x="522" y="527"><tspan class="key">s</tspan><tspan class="btn"> Redo recap</tspan></text>
+  <rect x="632" y="512" width="80" height="21" rx="4" fill="#262c36"/>
+  <text x="642" y="527"><tspan class="key">m</tspan><tspan class="btn"> Unmark</tspan></text>
+  <rect x="720" y="512" width="88" height="21" rx="4" fill="#262c36"/>
+  <text x="730" y="527"><tspan class="key">c</tspan><tspan class="btn"> Compact</tspan></text>
+  <rect x="816" y="512" width="80" height="21" rx="4" fill="#262c36"/>
+  <text x="826" y="527"><tspan class="key">d</tspan><tspan class="btn"> Delete</tspan></text>
+
+  <text x="412" y="564" class="dim">r refresh · o resume · s recap · m mark · n join new · i join into</text>
+  <text x="412" y="584" class="dim">c compact · d delete · e delete empty · esc close</text>
+</svg>
