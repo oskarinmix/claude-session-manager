@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="300" viewBox="0 0 960 300" role="img" aria-label="Joining sessions: marked sessions are summarized by Sonnet, then either become a new session or are appended to an existing one">
+  <style>
+    text { font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 14px; fill: #d7dbe0; }
+    .t { font-weight: 700; font-size: 15px; fill: #f2efe9; }
+    .s { font-size: 12.5px; fill: #8b95a5; }
+    .k { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 700; fill: #d97757; }
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#6b7585"/>
+    </marker>
+  </defs>
+  <rect width="960" height="300" rx="14" fill="#14171d"/>
+  <rect x="0.5" y="0.5" width="959" height="299" rx="14" fill="none" stroke="#2c323d"/>
+
+  <!-- sources -->
+  <g>
+    <rect x="32" y="52" width="200" height="56" rx="9" fill="#1f2530" stroke="#e3c063"/>
+    <text x="48" y="76" class="t">✓ Auth refactor</text>
+    <text x="48" y="96" class="s">marked with m</text>
+    <rect x="32" y="122" width="200" height="56" rx="9" fill="#1f2530" stroke="#e3c063"/>
+    <text x="48" y="146" class="t">✓ Fix pane focus bug</text>
+    <text x="48" y="166" class="s">marked with m</text>
+    <rect x="32" y="192" width="200" height="56" rx="9" fill="#1f2530" stroke="#e3c063" stroke-dasharray="4 4"/>
+    <text x="48" y="216" class="t">✓ …more</text>
+    <text x="48" y="236" class="s">two or more for a new session</text>
+  </g>
+
+  <path d="M236 80 C 280 80, 280 150, 316 150" fill="none" stroke="#6b7585" stroke-width="1.5" marker-end="url(#a)"/>
+  <path d="M236 150 L316 150" fill="none" stroke="#6b7585" stroke-width="1.5" marker-end="url(#a)"/>
+  <path d="M236 220 C 280 220, 280 150, 316 150" fill="none" stroke="#6b7585" stroke-width="1.5" marker-end="url(#a)"/>
+
+  <!-- summary -->
+  <rect x="320" y="104" width="240" height="92" rx="10" fill="#262f3d" stroke="#d97757" stroke-width="1.5"/>
+  <text x="440" y="136" text-anchor="middle" class="t">Sonnet writes one summary</text>
+  <text x="440" y="158" text-anchor="middle" class="s">of every marked session,</text>
+  <text x="440" y="176" text-anchor="middle" class="s">named by its title</text>
+
+  <path d="M564 136 C 610 136, 610 86, 648 86" fill="none" stroke="#6b7585" stroke-width="1.5" marker-end="url(#a)"/>
+  <path d="M564 166 C 610 166, 610 216, 648 216" fill="none" stroke="#6b7585" stroke-width="1.5" marker-end="url(#a)"/>
+
+  <!-- outcomes -->
+  <rect x="652" y="46" width="276" height="84" rx="10" fill="#1f2530" stroke="#6cc979"/>
+  <text x="668" y="72"><tspan class="k">n</tspan><tspan class="t">  Join as new session</tspan></text>
+  <text x="668" y="94" class="s">Creates “Joined: A + B” from the summary.</text>
+  <text x="668" y="112" class="s">Originals stay untouched.</text>
+
+  <rect x="652" y="174" width="276" height="84" rx="10" fill="#1f2530" stroke="#56c7d6"/>
+  <text x="668" y="200"><tspan class="k">i</tspan><tspan class="t">  Join into selected session</tspan></text>
+  <text x="668" y="222" class="s">Appends the summary as a message,</text>
+  <text x="668" y="240" class="s">keeps its history. Backup saved first.</text>
+
+  <text x="32" y="30" class="s">JOIN SESSIONS</text>
+  <text x="32" y="280" class="s">Joined sessions carry a summary of each source, not its full message history.</text>
+</svg>
