@@ -1,18 +1,19 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Scope, SessionInfo, SessionSummary } from '../types'
+import type { SessionInfo, SessionSummary } from '../types'
 
 const PANE = 'session-manager'
 const TITLE = 'Sessions'
 
 const sessions = atom({ plugin: 'session-manager', key: 'sessions' } as const, [])
-const scope = atom({ plugin: 'session-manager', key: 'scope' } as const, 'project')
 const selected = atom({ plugin: 'session-manager', key: 'selected' } as const, null)
 const confirmDelete = atom({ plugin: 'session-manager', key: 'confirmDelete' } as const, null)
 const busy = atom({ plugin: 'session-manager', key: 'busy' } as const, null)
 const message = atom({ plugin: 'session-manager', key: 'message' } as const, null)
 const summaries = atom({ plugin: 'session-manager', key: 'summaries' } as const, {})
+const marked = atom({ plugin: 'session-manager', key: 'marked' } as const, [])
+const confirmEmpty = atom({ plugin: 'session-manager', key: 'confirmEmpty' } as const, false)
 
 const COMPACT_SYSTEM =
   'You summarize a coding conversation between a user and Claude Code so the work can continue ' +
@@ -41,6 +42,17 @@ const BRIEF_PROMPT = (transcript: string) =>
 
 const BRIEF_LIMIT = 200000
 
+const JOIN_PROMPT = (parts: string[]) =>
+  'Below are several separate Claude Code conversations that are being joined so the work can ' +
+  'continue as one. Write one detailed summary covering all of them, with these sections:\n' +
+  '1. Primary Requests and Intent (per conversation)\n2. Key Technical Concepts\n' +
+  '3. Files and Code Sections\n4. Errors and Fixes\n5. Decisions and Problem Solving\n' +
+  '6. Pending Tasks\n7. Where Each Conversation Was Left\n8. Optional Next Step\n\n' +
+  'Name each conversation by its title where it matters. Reply with the summary only.\n\n' +
+  parts.join('\n\n')
+
+const JOIN_LIMIT = 600000
+
 const helper = async ($: EngineInterface, args: string[], stdin?: string) => {
   const script = `${$.plugin.root}/scripts/sm.cjs`
   const ran = await $.process.run(['node', script, ...args], { stdin, timeoutMs: 120000 })
@@ -52,8 +64,8 @@ const describeError = (error: unknown) => (error instanceof Error ? error.messag
 
 const refresh = async ($: EngineInterface) => {
   const currentId = await $.session.id()
-  const where: Scope = await read($, scope)
-  const list = JSON.parse(await helper($, ['list', currentId, where])) as SessionInfo[]
+  const root = await $.session.root()
+  const list = JSON.parse(await helper($, ['list', currentId, root])) as SessionInfo[]
   await update($, sessions, () => list)
 }
 
@@ -101,20 +113,26 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'sessions',
-      description: 'Browse saved sessions: recap, rename, compact or delete them',
+      description: 'Browse saved sessions: resume, recap, rename, compact, join or delete them',
     })
 
     return next(e)
   })
 
   on('command.run', { command: 'sessions' }, async $ => {
-    await $.ui.open({ id: PANE, title: TITLE, focus: true, closeOnEscape: true })
+    const opened = await $.ui.open({
+      id: PANE,
+      title: TITLE,
+      focus: true,
+      closeOnEscape: true,
+    })
+    if (!opened.isPlaced) return { text: `Sessions pane not shown: ${opened.reason}` }
     await run($, 'Loading sessions…', async () => {
       await refresh($)
       return ''
     })
 
-    return { text: 'Sessions pane opened.' }
+    return { text: 'Sessions pane opened. If keys type into the chat, press ctrl+x then tab to focus it.' }
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
@@ -122,7 +140,6 @@ export const register: Register = on => {
     const { Box, Text, Button } = elements
     const Input = 'Input' in elements ? elements.Input : undefined
     const list = await read($, sessions)
-    const where = await read($, scope)
     const pickedId = await read($, selected)
     const deleting = await read($, confirmDelete)
     const working = await read($, busy)
@@ -131,10 +148,21 @@ export const register: Register = on => {
     const currentId = await $.session.id()
     const now = await $.clock.now()
     const width = Math.max(24, (e.props.bodyColumns ?? 80) - 6)
+    const isFullscreen = e.viewport?.isFullscreen === true
     const picked = list.find(session => session.id === pickedId)
     const recap = picked === undefined ? undefined : recaps[picked.id]
     const recapLines = recap === undefined ? 0 : recap.text.split('\n').length
-    const room = Math.max(3, (e.viewport?.rows ?? 24) - (picked ? 18 + recapLines : 9))
+    const markedIds = await read($, marked)
+    const marks = list.filter(session => markedIds.includes(session.id))
+    const joinLines = marks.length > 0 ? 3 : 0
+    const room = Math.max(
+      3,
+      e.props.scroll.bodyRows - (picked ? 18 + recapLines : 9) - joinLines,
+    )
+    const intoTarget =
+      picked !== undefined && picked.id !== currentId && !markedIds.includes(picked.id)
+        ? picked
+        : undefined
 
     const pick = (session: SessionInfo) => async () => {
       await update($, selected, current => (current === session.id ? null : session.id))
@@ -147,11 +175,6 @@ export const register: Register = on => {
         await refresh($)
         return ''
       })
-
-    const switchScope = async () => {
-      await update($, scope, current => (current === 'project' ? 'all' : 'project'))
-      await reload()
-    }
 
     const summarize = (session: SessionInfo) => () =>
       run($, `Writing a recap of ${nameOf(session)}…`, async () => {
@@ -210,6 +233,94 @@ export const register: Register = on => {
 
     const cancelDelete = () => update($, confirmDelete, () => null)
 
+    const resumeNow = (session: SessionInfo) => async () => {
+      try {
+        await $.ui.close({ id: PANE })
+        await $.command.run({ command: 'resume', args: session.id })
+      } catch (error) {
+        await update($, message, () => `Failed: ${describeError(error)}`)
+      }
+    }
+
+    const toggleMark = (session: SessionInfo) => () =>
+      update($, marked, current =>
+        current.includes(session.id)
+          ? current.filter(id => id !== session.id)
+          : [...current, session.id],
+      )
+
+    const clearMarks = () => update($, marked, () => [])
+
+    const joinedSummary = async (sources: SessionInfo[]) => {
+      const share = Math.floor(JOIN_LIMIT / sources.length)
+      const parts: string[] = []
+      for (const source of sources) {
+        const transcript = await helper($, ['transcript', source.file])
+        if (!transcript.trim()) continue
+        parts.push(
+          `<conversation title="${nameOf(source).replace(/"/g, "'")}">\n` +
+            transcript.slice(-share) +
+            '\n</conversation>',
+        )
+      }
+      if (parts.length === 0) throw new Error('the marked sessions have no messages')
+      const reply = await $.model.complete({
+        model: 'sonnet',
+        system: COMPACT_SYSTEM,
+        prompt: JOIN_PROMPT(parts),
+        maxTokens: 8000,
+        timeoutMs: 300000,
+      })
+      if (!reply.isAnswered) throw new Error(`no summary (${reply.reason})`)
+      return reply.text
+    }
+
+    const joinAsNew = (sources: SessionInfo[]) => () =>
+      run($, `Joining ${sources.length} sessions into a new one…`, async () => {
+        const summary = await joinedSummary(sources)
+        const anchor = list.find(session => session.id === currentId) ?? sources[0]!
+        const title = fit(`Joined: ${sources.map(nameOf).join(' + ')}`, 100)
+        const files = [anchor, ...sources].map(session => session.file)
+        const made = JSON.parse(await helper($, ['join-new', title, ...files], summary)) as {
+          id: string
+        }
+        await update($, marked, () => [])
+        await update($, selected, () => made.id)
+        await refresh($)
+        return `Created "${title}". Press Resume to open it.`
+      })
+
+    const joinInto = (target: SessionInfo, sources: SessionInfo[]) => () =>
+      run($, `Joining ${sources.length} sessions into ${nameOf(target)}…`, async () => {
+        const summary = await joinedSummary(sources)
+        await helper($, ['join-into', target.file], summary)
+        await $.store.delete(`summary:${target.id}`)
+        await update($, marked, () => [])
+        await refresh($)
+        return `Joined into ${nameOf(target)} (backup saved as .jsonl.bak).`
+      })
+
+    const empties = list.filter(session => session.isEmpty && session.id !== currentId)
+    const clearingEmpty = await read($, confirmEmpty)
+
+    const askDeleteEmpty = () => update($, confirmEmpty, () => true)
+
+    const cancelDeleteEmpty = () => update($, confirmEmpty, () => false)
+
+    const deleteEmptyNow = () =>
+      run($, `Deleting ${empties.length} empty sessions…`, async () => {
+        await update($, confirmEmpty, () => false)
+        for (const session of empties) {
+          await helper($, ['delete', session.file])
+          await $.store.delete(`summary:${session.id}`)
+        }
+        const gone = empties.map(session => session.id)
+        await update($, marked, current => current.filter(id => !gone.includes(id)))
+        await update($, selected, current => (current !== null && gone.includes(current) ? null : current))
+        await refresh($)
+        return `Deleted ${gone.length} empty sessions.`
+      })
+
     const totalBytes = list.reduce((sum, session) => sum + session.size, 0)
 
     return (
@@ -217,21 +328,42 @@ export const register: Register = on => {
         <Box flexDirection="row" justifyContent="space-between">
           <Box flexDirection="row" gap={1}>
             <Text bold color="cyan">
-              ◆ {where === 'project' ? 'This project' : 'All projects'}
+              ◆ This project
             </Text>
             <Text dimColor>
               {list.length} sessions · {formatSize(totalBytes)}
             </Text>
           </Box>
           <Box flexDirection="row" gap={1}>
-            <Button key="scope" hotkey="a" onPress={switchScope}>
-              {where === 'project' ? 'All projects' : 'This project'}
-            </Button>
             <Button key="refresh" hotkey="r" onPress={reload}>
               Refresh
             </Button>
           </Box>
         </Box>
+        {empties.length > 0 && working === null && (
+          <Box flexDirection="row" gap={1}>
+            {clearingEmpty ? (
+              <>
+                <Text color="red" bold>
+                  Delete {empties.length} empty sessions permanently?
+                </Text>
+                <Button key="empty-yes" onPress={deleteEmptyNow}>
+                  Yes, delete
+                </Button>
+                <Button key="empty-no" onPress={cancelDeleteEmpty}>
+                  Cancel
+                </Button>
+              </>
+            ) : (
+              <>
+                <Text dimColor>{empties.length} empty (no conversation)</Text>
+                <Button key="empty" hotkey="e" onPress={askDeleteEmpty}>
+                  Delete empty
+                </Button>
+              </>
+            )}
+          </Box>
+        )}
         {working !== null && <Text color="yellow">⟳ {working}</Text>}
         {working === null && note !== null && note !== '' && (
           <Text color={note.startsWith('Failed') ? 'red' : 'green'}>
@@ -244,6 +376,7 @@ export const register: Register = on => {
           {list.slice(0, room).map(session => {
             const isCurrent = session.id === currentId
             const isPicked = session.id === pickedId
+            const isMarked = markedIds.includes(session.id)
             const age = formatAge(now - session.mtimeMs)
             const size = formatSize(session.size)
             const tail = isCurrent ? ' · current' : ''
@@ -254,6 +387,7 @@ export const register: Register = on => {
                 <Text color={isPicked ? 'magenta' : isCurrent ? 'green' : 'cyan'}>
                   {isPicked ? '▸ ' : isCurrent ? '● ' : '  '}
                 </Text>
+                <Text color="yellow">{isMarked ? '✓ ' : ''}</Text>
                 <Text bold={isPicked} color={isPicked ? 'magenta' : undefined}>
                   {label}
                 </Text>{' '}
@@ -267,6 +401,28 @@ export const register: Register = on => {
           })}
           {list.length > room && <Text dimColor>  …and {list.length - room} more</Text>}
         </Box>
+        {marks.length > 0 && (
+          <Box flexDirection="column" marginTop={1}>
+            <Text color="yellow">
+              ✓ {marks.length} marked: {fit(marks.map(nameOf).join(', '), width - 14)}
+            </Text>
+            <Box flexDirection="row" gap={1}>
+              {marks.length >= 2 && (
+                <Button key="join-new" hotkey="n" variant="primary" onPress={joinAsNew(marks)}>
+                  Join as new session
+                </Button>
+              )}
+              {intoTarget !== undefined && (
+                <Button key="join-into" hotkey="i" onPress={joinInto(intoTarget, marks)}>
+                  {fit(`Join into ${nameOf(intoTarget)}`, 40)}
+                </Button>
+              )}
+              <Button key="join-clear" hotkey="x" onPress={clearMarks}>
+                Clear marks
+              </Button>
+            </Box>
+          </Box>
+        )}
         {picked !== undefined && (
           <Box
             flexDirection="column"
@@ -312,8 +468,16 @@ export const register: Register = on => {
               </Box>
             )}
             <Box flexDirection="row" gap={1} marginTop={1}>
-              <Button key="recap" hotkey="s" variant="primary" onPress={summarize(picked)}>
+              {picked.id !== currentId && (
+                <Button key="resume" hotkey="o" variant="primary" onPress={resumeNow(picked)}>
+                  Resume
+                </Button>
+              )}
+              <Button key="recap" hotkey="s" onPress={summarize(picked)}>
                 {recap !== undefined ? 'Redo recap' : 'Recap'}
+              </Button>
+              <Button key="mark" hotkey="m" onPress={toggleMark(picked)}>
+                {markedIds.includes(picked.id) ? 'Unmark' : 'Mark to join'}
               </Button>
               {picked.id === currentId ? (
                 <Text dimColor>Current session: use /compact or /rename here.</Text>
@@ -342,8 +506,16 @@ export const register: Register = on => {
             </Box>
           </Box>
         )}
+        {!isFullscreen && (
+          <Text color="yellow" bold>
+            Not in fullscreen mode: the side pane and mouse clicks need it. Run /tui fullscreen.
+          </Text>
+        )}
+        {isFullscreen && !e.props.isFocused && (
+          <Text color="yellow">Click here (or ctrl+x then tab) to use this pane's keys.</Text>
+        )}
         <Text dimColor>
-          a scope · r refresh · s recap · c compact · d delete · esc close
+          r refresh · o resume · s recap · m mark · n join new · i join into · c compact · d delete · e delete empty · esc close
         </Text>
       </Box>
     )

@@ -2,6 +2,6 @@
   "name": "session-manager",
   "version": "0.2.0",
   "description": "Browse saved Claude Code sessions in a pane: recap, rename, compact or delete them.",
-  "author": { "name": "Oscar Ceballos" },
+  "author": { "name": "Oscar Ceballos Contreras" },
   "license": "MIT"
 }

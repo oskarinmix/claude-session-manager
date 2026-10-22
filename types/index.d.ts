@@ -7,9 +7,8 @@ export type SessionInfo = {
   title: string
   isCustomTitle: boolean
   preview: string
+  isEmpty: boolean
 }
-
-export type Scope = 'project' | 'all'
 
 export type SessionSummary = { text: string; mtimeMs: number }
 
@@ -17,12 +16,13 @@ declare module 'claude-code' {
   interface PluginState {
     'session-manager': {
       sessions: SessionInfo[]
-      scope: Scope
       selected: string | null
       confirmDelete: string | null
       busy: string | null
       message: string | null
       summaries: Record<string, SessionSummary>
+      marked: string[]
+      confirmEmpty: boolean
     }
   }
 }
