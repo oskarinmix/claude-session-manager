@@ -7,6 +7,7 @@
 //   join-new <title> <anchor> <sources...>  new session beside anchor, starting from summary (stdin)
 //   join-into <file>                        appends merged context (stdin) to an existing session
 //   delete <file>                           removes the file and its sidecar folder
+//   handoff-file <name>                     saves a handoff (stdin) under the OS temp dir
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
@@ -471,6 +472,16 @@ const remove = file => {
   return { ok: true }
 }
 
+// Outside every project: the handoff is read once by the new agent.
+const handoffFile = (name, text) => {
+  const dir = path.join(os.tmpdir(), 'claude-handoffs')
+  fs.mkdirSync(dir, { recursive: true })
+  const slug = clean(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'handoff'
+  const file = path.join(dir, `${slug}-${Date.now()}.md`)
+  fs.writeFileSync(file, text)
+  return { path: file }
+}
+
 const main = () => {
   const [command, ...args] = process.argv.slice(2)
   if (command === 'list') return JSON.stringify(list(args[0], args[1]))
@@ -489,6 +500,9 @@ const main = () => {
   }
   if (command === 'join-into') {
     return JSON.stringify(joinInto(assertSessionFile(args[0]), fs.readFileSync(0, 'utf8')))
+  }
+  if (command === 'handoff-file') {
+    return JSON.stringify(handoffFile(args[0] || '', fs.readFileSync(0, 'utf8')))
   }
   if (command === 'delete') return JSON.stringify(remove(assertSessionFile(args[0])))
   throw new Error(`unknown command: ${command}`)

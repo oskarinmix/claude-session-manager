@@ -38,6 +38,7 @@ declare module 'claude-code' {
       summaries: Record<string, SessionSummary>
       marked: string[]
       confirmCopies: boolean
+      forking: string | null
     }
   }
 }

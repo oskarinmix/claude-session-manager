@@ -14,6 +14,7 @@ const message = atom({ plugin: 'session-manager', key: 'message' } as const, nul
 const summaries = atom({ plugin: 'session-manager', key: 'summaries' } as const, {})
 const marked = atom({ plugin: 'session-manager', key: 'marked' } as const, [])
 const confirmCopies = atom({ plugin: 'session-manager', key: 'confirmCopies' } as const, false)
+const forking = atom({ plugin: 'session-manager', key: 'forking' } as const, null)
 
 const COMPACT_SYSTEM =
   'You summarize a coding conversation between a user and Claude Code so the work can continue ' +
@@ -52,6 +53,19 @@ const JOIN_PROMPT = (parts: string[]) =>
   parts.join('\n\n')
 
 const JOIN_LIMIT = 600000
+
+const HANDOFF_PROMPT = (transcript: string, goal: string) =>
+  'Write a handoff document so a fresh Claude Code agent can start new work using the context of ' +
+  'the conversation below. ' +
+  (goal === ''
+    ? 'The user will say what to build next, so do not assume a goal.\n\n'
+    : `The new session will be used for: ${goal}\nPoint the sections at that goal.\n\n`) +
+  'Sections:\n1. What Was Built and Decided\n2. Files and Where Things Live (paths, not copies)\n' +
+  '3. Open Issues and Gotchas\n4. Where the Work Was Left\n5. Suggested Skills (which skills the agent should call the Skill tool for)\n\n' +
+  'Reference commits, specs, plans and files by path or URL instead of copying them. Redact API ' +
+  'keys, passwords and personal information. Reply with the document only.\n\n<conversation>\n' +
+  transcript +
+  '\n</conversation>'
 
 const helper = async ($: EngineInterface, args: string[], stdin?: string) => {
   const script = `${$.plugin.root}/scripts/sm.cjs`
@@ -181,6 +195,7 @@ export const register: Register = on => {
     const list = await read($, sessions)
     const pickedId = await read($, selected)
     const deleting = await read($, confirmDelete)
+    const forkingId = await read($, forking)
     const working = await read($, busy)
     const note = await read($, message)
     const recaps = await read($, summaries)
@@ -197,7 +212,7 @@ export const register: Register = on => {
     const joinLines = marks.length > 0 ? 3 : 0
     const room = Math.max(
       3,
-      e.props.scroll.bodyRows - (picked ? 18 + recapLines : 9) - joinLines,
+      e.props.scroll.bodyRows - (picked ? 18 + recapLines + (forkingId === picked.id ? 3 : 0) : 9) - joinLines,
     )
     // Empty sessions stay out of the list, as in /resume; loading the pane deletes them.
     const shown = list.filter(session => !session.isEmpty || session.id === currentId || session.id === pickedId)
@@ -313,14 +328,46 @@ export const register: Register = on => {
         return `Opened "${nameOf(session)}" as a background agent: find it in the agents view.`
       })
 
-    // Resuming here drops this window's conversation, so it is offered only
-    // while that is empty (a new session not yet written counts too).
+    // A new background agent seeded with a handoff of this session: the summary
+    // goes to a file, the prompt only points at it, so argv stays short.
+    // With a goal the agent starts on it; without one it reads the handoff and
+    // waits for the person to open it and say what to build.
+    const handOff = (session: SessionInfo) => (value: string) =>
+      run($, `Writing a handoff of ${nameOf(session)}…`, async () => {
+        await update($, forking, () => null)
+        const goal = value.trim()
+        const transcript = await helper($, ['transcript', session.file])
+        if (!transcript.trim()) return 'Nothing to hand off yet.'
+        const reply = await $.model.complete({
+          model: 'sonnet',
+          system: COMPACT_SYSTEM,
+          prompt: HANDOFF_PROMPT(transcript.slice(-JOIN_LIMIT), goal),
+          maxTokens: 8000,
+          timeoutMs: 300000,
+        })
+        if (!reply.isAnswered) throw new Error(`no handoff (${reply.reason})`)
+        const name = fit(goal || `${nameOf(session)} (fork)`, 60)
+        const saved = JSON.parse(await helper($, ['handoff-file', name], reply.text)) as { path: string }
+        const prompt =
+          `Read the handoff at ${saved.path}; it carries the context of an earlier session. ` +
+          (goal === ''
+            ? 'Do not start any work: reply with a short summary of what you now know, then wait for my instructions.'
+            : `Then: ${goal}`)
+        const ran = await $.process.run(['claude', '--bg', '--name', name, '--', prompt], {
+          cwd: await $.session.root(),
+          timeoutMs: 60000,
+        })
+        if (ran.exitCode !== 0) throw new Error(ran.stderr.trim() || `claude exited ${ran.exitCode}`)
+        await refresh($)
+        return goal === ''
+          ? `Forked into "${name}": open it in the agents view and give it instructions. Handoff: ${saved.path}`
+          : `Forked into "${name}", working on the goal: see the agents view. Handoff: ${saved.path}`
+      })
+
     // Inside the agents view this pane runs in a background agent; the terminal
     // under it is an interactive process holding the session it started with.
     const inAgentView = list.find(session => session.id === currentId)?.live?.kind === 'bg'
     const isHost = (session: SessionInfo) => inAgentView && session.live?.kind === 'interactive'
-
-    const hereIsEmpty = list.find(session => session.id === currentId)?.isEmpty ?? true
 
     const toggleMark = (session: SessionInfo) => () =>
       update($, marked, current =>
@@ -419,7 +466,8 @@ export const register: Register = on => {
         ? []
         : [
             ...(canAct ? ['o open as agent'] : []),
-            ...(canAct && hereIsEmpty ? ['h resume here'] : []),
+            ...(canAct ? ['h resume here'] : []),
+            'f fork',
             's recap',
             'm mark',
             ...(canAct ? ['c compact', 'd delete'] : []),
@@ -616,17 +664,40 @@ export const register: Register = on => {
                 />
               </Box>
             )}
+            {Input !== undefined && forkingId === picked.id && (
+              <Box marginTop={1} flexDirection="column">
+                <Text color="cyan">
+                  Fork from a handoff. Type a goal and the new agent starts on it, or press Enter empty and it waits for your instructions.
+                </Text>
+                <Box flexDirection="row" gap={1}>
+                  <Input
+                    key={`handoff-${picked.id}`}
+                    label="Goal"
+                    placeholder="optional"
+                    submitLabel="Fork"
+                    autoFocus
+                    onSubmit={handOff(picked)}
+                  />
+                  <Button key="fork-cancel" onPress={() => update($, forking, () => null)}>
+                    Cancel
+                  </Button>
+                </Box>
+              </Box>
+            )}
             <Box flexDirection="row" gap={1} marginTop={1}>
               {picked.id !== currentId && !pickedIsOpen && (
                 <Button key="open-agent" hotkey="o" variant="primary" onPress={openAsAgent(picked)}>
                   Open as agent
                 </Button>
               )}
-              {picked.id !== currentId && !pickedIsOpen && hereIsEmpty && (
+              {picked.id !== currentId && !pickedIsOpen && (
                 <Button key="resume" hotkey="h" onPress={resumeNow(picked)}>
                   Resume here
                 </Button>
               )}
+              <Button key="fork" hotkey="f" onPress={() => update($, forking, () => picked.id)}>
+                Fork
+              </Button>
               <Button key="recap" hotkey="s" onPress={summarize(picked)}>
                 {recap !== undefined ? 'Redo recap' : 'Recap'}
               </Button>

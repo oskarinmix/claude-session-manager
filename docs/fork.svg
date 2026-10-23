@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="300" viewBox="0 0 960 300" role="img" aria-label="Forking a session: Sonnet writes a handoff of it, then a new background agent reads the handoff and either starts on the goal you typed or waits for your instructions">
+  <style>
+    text { font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; font-size: 14px; fill: #d7dbe0; }
+    .t { font-weight: 700; font-size: 15px; fill: #f2efe9; }
+    .s { font-size: 12.5px; fill: #8b95a5; }
+    .m { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; fill: #8b95a5; }
+    .k { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 700; fill: #d97757; }
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="#6b7585"/>
+    </marker>
+  </defs>
+  <rect width="960" height="300" rx="14" fill="#14171d"/>
+  <rect x="0.5" y="0.5" width="959" height="299" rx="14" fill="none" stroke="#2c323d"/>
+
+  <!-- source -->
+  <rect x="32" y="108" width="200" height="84" rx="9" fill="#1f2530" stroke="#d38be6"/>
+  <text x="48" y="134"><tspan class="k">f</tspan><tspan class="t">  Auth refactor</tspan></text>
+  <text x="48" y="156" class="s">any session, even the</text>
+  <text x="48" y="174" class="s">one you are in</text>
+
+  <path d="M236 150 L316 150" fill="none" stroke="#6b7585" stroke-width="1.5" marker-end="url(#a)"/>
+
+  <!-- handoff -->
+  <rect x="320" y="96" width="240" height="108" rx="10" fill="#262f3d" stroke="#d97757" stroke-width="1.5"/>
+  <text x="440" y="126" text-anchor="middle" class="t">Sonnet writes a handoff</text>
+  <text x="440" y="148" text-anchor="middle" class="s">what was built and decided, files,</text>
+  <text x="440" y="166" text-anchor="middle" class="s">open issues, where it was left</text>
+  <text x="440" y="188" text-anchor="middle" class="m">%TEMP%/claude-handoffs/</text>
+
+  <path d="M564 132 C 610 132, 610 86, 648 86" fill="none" stroke="#6b7585" stroke-width="1.5" marker-end="url(#a)"/>
+  <path d="M564 170 C 610 170, 610 216, 648 216" fill="none" stroke="#6b7585" stroke-width="1.5" marker-end="url(#a)"/>
+
+  <!-- outcomes -->
+  <rect x="652" y="46" width="276" height="84" rx="10" fill="#1f2530" stroke="#6cc979"/>
+  <text x="668" y="72" class="t">Goal typed</text>
+  <text x="668" y="94" class="s">New agent named after the goal</text>
+  <text x="668" y="112" class="s">reads the handoff, then starts on it.</text>
+
+  <rect x="652" y="174" width="276" height="84" rx="10" fill="#1f2530" stroke="#56c7d6"/>
+  <text x="668" y="200" class="t">Goal left empty</text>
+  <text x="668" y="222" class="s">“Auth refactor (fork)” reads it, sums up,</text>
+  <text x="668" y="240" class="s">then waits for your instructions.</text>
+
+  <text x="32" y="30" class="s">FORK FROM A HANDOFF</text>
+  <text x="32" y="280" class="s">Not a copy: the new agent starts fresh from the handoff, and the original session is not changed.</text>
+</svg>

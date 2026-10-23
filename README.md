@@ -12,28 +12,30 @@
 <p>
   <a href="#install">Install</a> ·
   <a href="#use">Use</a> ·
+  <a href="#fork-from-a-handoff">Fork</a> ·
   <a href="#join-sessions">Join sessions</a> ·
   <a href="#how-it-works">How it works</a>
 </p>
 
 </div>
 
-A Claude Code mod that adds a **Sessions** pane for browsing your saved sessions (the `.jsonl` transcripts under `~/.claude/projects`). From the pane you can resume any session, read a short recap of it, rename it, compact it like `/compact`, join several into one, or delete it.
+A Claude Code mod that adds a **Sessions** pane for browsing your saved sessions (the `.jsonl` transcripts under `~/.claude/projects`). From the pane you can resume any session (here or as a background agent), read a short recap of it, rename it, fork it into a new agent from a handoff, compact it like `/compact`, join several into one, or delete it.
 
 <p align="center">
-  <img src="docs/pane.svg" alt="The Sessions pane open beside a conversation: a list of sessions with sizes and ages, two marked for joining, and the selected session's recap and actions" width="100%">
+  <img src="docs/pane.svg" alt="The Sessions pane open beside a conversation: a list of sessions with sizes and ages, two marked for joining, and the selected session's recap, the Fork goal box and actions" width="100%">
 </p>
 
 ## Features
 
 |  |  |
 | --- | --- |
-| ▶️ **Resume** | Jump into any session of the current project, same as `/resume`. |
+| ▶️ **Resume** | Jump into any session of the current project, same as `/resume`, or open it as a background agent. |
 | 📝 **Recap** | A 3–5 line summary written by Haiku, cached until the session changes. |
 | ✏️ **Rename** | Give a session one name, shown in both `/resume` and the agents view. |
+| 🍴 **Fork** | Start a new background agent from a handoff of a session: give it a goal, or let it wait for your instructions. |
 | 🗜️ **Compact** | Shrink a heavy session like `/compact`, without opening it. |
 | 🔗 **Join** | Merge several sessions into a new one, or into an existing one. |
-| 🧹 **Clean up** | Delete one session, or every empty one left behind by restarts and `/clear`. |
+| 🧹 **Clean up** | Delete one session or the copies left by resuming open ones; empty sessions are removed automatically. |
 
 Sizes are color-coded so heavy sessions stand out: **yellow** from 2 MB, **red** from 5 MB.
 
@@ -90,7 +92,8 @@ The pane opens by itself beside the chat when a session starts (in fullscreen mo
 | <kbd>r</kbd> | Refresh the list |
 | — | **⇣ compacted** mark: shown while the last thing in the session is a compaction (`/compact`, auto-compact or the pane's Compact). Once more is added it goes away; the details then say "compacted before, more added since". The file keeps the full history, Claude reads from the last summary on. The footer lists only the keys usable right now |
 | <kbd>o</kbd> | **Open as agent**: opens the session as a new background agent (`claude --bg --resume`), same id, shown in the agents view. This window's session is left alone |
-| <kbd>h</kbd> | **Resume here**: closes the pane and opens the session in this window, same as `/resume`. Only shown while this window's session is new and empty, so no conversation is left behind |
+| <kbd>f</kbd> | **Fork**: opens a Goal box. The mod writes a handoff of the session (Sonnet) to `%TEMP%/claude-handoffs/` and starts a new background agent that reads it. With a goal, the agent (named after the goal) starts on it; with Enter on an empty box, the agent (`<name> (fork)`) replies with a short summary and waits for your instructions. Not a copy: the new session starts fresh from the handoff. Works on any session, including the current one |
+| <kbd>h</kbd> | **Resume here**: closes the pane and opens the session in this window, same as `/resume` |
 | <kbd>s</kbd> | **Recap**: 3–5 line summary of the session, written by Haiku and cached until the session changes |
 | <kbd>Esc</kbd> | Close the pane |
 
@@ -126,6 +129,19 @@ A session marked **open** is held by another Claude Code process (another window
 > [!NOTE]
 > The current session is shown in green. Resume, Compact, Delete and Join into are disabled for it: use `/compact` and `/rename` there.
 
+## Fork from a handoff
+
+<p align="center">
+  <img src="docs/fork.svg" alt="Pressing f on a session: Sonnet writes a handoff of it, then a new background agent reads the handoff and either starts on the goal you typed or waits for your instructions" width="100%">
+</p>
+
+Select a session, press <kbd>f</kbd>, and a **Goal** box opens with the cursor in it:
+
+- **Type a goal** and press Enter: the handoff is written with that goal in mind, and the new agent, named after the goal, reads it and starts working.
+- **Press Enter on an empty box**: the new agent, named `<session name> (fork)`, reads the handoff, replies with a short summary and waits. Open it in the agents view and tell it what to build.
+
+The handoff is a Markdown file under `%TEMP%/claude-handoffs/` (your OS temp folder) covering what was built and decided, the files involved, open issues, where the work was left and which skills to use. The new session starts fresh from it, so a long conversation becomes a small, focused starting point. The original session is not changed.
+
 ## Join sessions
 
 <p align="center">
@@ -135,7 +151,7 @@ A session marked **open** is held by another Claude Code process (another window
 Joined sessions carry a **summary** of each source, not its full message history.
 
 > [!IMPORTANT]
-> Recap, Compact and Join make model calls through your Claude Code login, so they count toward your usage.
+> Recap, Fork, Compact and Join make model calls through your Claude Code login, so they count toward your usage.
 
 ## How it works
 
@@ -143,7 +159,7 @@ Joined sessions carry a **summary** of each source, not its full message history
 claude-session-manager/
 ├── hooks/index.tsx   the pane, the /sessions command and the model calls
 └── scripts/sm.cjs    lists sessions, extracts transcripts, writes rename/compact/join rows,
-                      creates joined sessions and deletes files
+                      creates joined sessions, saves handoffs and deletes files
 ```
 
 `scripts/sm.cjs` refuses any path outside `~/.claude/projects` (or `$CLAUDE_CONFIG_DIR/projects`).
