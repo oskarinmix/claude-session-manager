@@ -30,7 +30,7 @@ A Claude Code mod that adds a **Sessions** pane for browsing your saved sessions
 | --- | --- |
 | ▶️ **Resume** | Jump into any session of the current project, same as `/resume`. |
 | 📝 **Recap** | A 3–5 line summary written by Haiku, cached until the session changes. |
-| ✏️ **Rename** | Give a session a title that also shows up in `/resume`. |
+| ✏️ **Rename** | Give a session one name, shown in both `/resume` and the agents view. |
 | 🗜️ **Compact** | Shrink a heavy session like `/compact`, without opening it. |
 | 🔗 **Join** | Merge several sessions into a new one, or into an existing one. |
 | 🧹 **Clean up** | Delete one session, or every empty one left behind by restarts and `/clear`. |
@@ -81,14 +81,16 @@ Clone the repo, then either start a session with `claude --plugin-dir /path/to/c
 
 ## Use
 
-Type **`/sessions`** to open the pane. Click a row (or press Enter on it) to select a session.
+The pane opens by itself beside the chat when a session starts (in fullscreen mode on a wide enough terminal); **`/sessions`** opens it again after you close it. Click a row (or press Enter on it) to select a session.
 
 #### Browse
 
 | Key | Action |
 | :---: | --- |
 | <kbd>r</kbd> | Refresh the list |
-| <kbd>o</kbd> | **Resume**: closes the pane and opens the session, same as `/resume` |
+| — | **⇣ compacted** mark: shown while the last thing in the session is a compaction (`/compact`, auto-compact or the pane's Compact). Once more is added it goes away; the details then say "compacted before, more added since". The file keeps the full history, Claude reads from the last summary on. The footer lists only the keys usable right now |
+| <kbd>o</kbd> | **Open as agent**: opens the session as a new background agent (`claude --bg --resume`), same id, shown in the agents view. This window's session is left alone |
+| <kbd>h</kbd> | **Resume here**: closes the pane and opens the session in this window, same as `/resume`. Only shown while this window's session is new and empty, so no conversation is left behind |
 | <kbd>s</kbd> | **Recap**: 3–5 line summary of the session, written by Haiku and cached until the session changes |
 | <kbd>Esc</kbd> | Close the pane |
 
@@ -96,7 +98,7 @@ Type **`/sessions`** to open the pane. Click a row (or press Enter on it) to sel
 
 | Key | Action |
 | :---: | --- |
-| Rename box | Saves a custom title (same as `/rename`), shown in `/resume` |
+| Rename box | Saves the name for both `/resume` and the agents view. When a session starts or is resumed, a newer name from either place is copied to the other |
 | <kbd>c</kbd> | **Compact**: Sonnet writes a full summary and appends a compact boundary, so resuming starts from the summary. A `.jsonl.bak` backup is saved first |
 
 #### Join
@@ -113,7 +115,10 @@ Type **`/sessions`** to open the pane. Click a row (or press Enter on it) to sel
 | Key | Action |
 | :---: | --- |
 | <kbd>d</kbd> | **Delete**: asks to confirm, then removes the transcript, its backup and its sidecar folder |
-| <kbd>e</kbd> | **Delete empty**: shown when the project has sessions with no conversation (only a title, `/clear` or commands, left behind by restarts and `/clear`). Asks to confirm, then deletes them all. The current session is never included |
+| (auto) | **Empty sessions are deleted** each time the pane loads: sessions with no conversation (only a title, `/clear` or commands, left behind by restarts and `/clear`). The current session and any session open in a window or agent are kept |
+| <kbd>p</kbd> | **Delete copies**: shown when the project has copies made by resuming a session while it was open elsewhere (marked `· copy`). Asks to confirm, and warns when a copy holds messages its original lacks. Copies open in a window and the current session are never included |
+
+A session marked **open** is held by another Claude Code process (another window, or a background agent in the agents list). Claude Code forks a copy when you resume a session that is already open, so Resume, Compact and Delete are turned off for it. Switch to it where it runs instead. A session marked **copy** is such a fork; its details name the session it was copied from.
 
 > [!WARNING]
 > Deleting cannot be undone.

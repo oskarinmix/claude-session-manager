@@ -1,4 +1,4 @@
 .claude-plugin/types/
 *.log
 .DS_Store
-/brag-output
+/brag-output.claude/

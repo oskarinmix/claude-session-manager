@@ -2,7 +2,8 @@
 //   list <currentSessionId> <projectRoot>   JSON array of this project's sessions
 //   transcript <file>                       conversation text since the last compact
 //   compact <file>                          appends a compact boundary + summary (stdin)
-//   rename <file> <title>                   appends a custom-title row
+//   rename <file> <title>                   appends custom-title and agent-name rows
+//   sync-name <id>                          makes custom-title match a newer agent-name
 //   join-new <title> <anchor> <sources...>  new session beside anchor, starting from summary (stdin)
 //   join-into <file>                        appends merged context (stdin) to an existing session
 //   delete <file>                           removes the file and its sidecar folder
@@ -43,10 +44,35 @@ const summarize = file => {
   const text = fs.readFileSync(file, 'utf8')
   let title = ''
   let isCustomTitle = false
+  let sessionTitle = ''
+  let agentName = ''
+  const aiTitles = new Set()
   let aiTitle = ''
   let preview = ''
   let hasReply = false
+  let compactions = 0
+  let repliesSinceCompact = 0
+  let branch = ''
+  let firstUuid = ''
+  const uuids = new Set()
   for (const line of text.split('\n')) {
+    if (line.startsWith('{') && (line.includes('"type":"user"') || line.includes('"type":"assistant"'))) {
+      // The row's own uuid follows its message, so the last match is the row's.
+      const matches = [...line.matchAll(/"uuid":"([^"]+)"/g)]
+      const uuid = matches.length > 0 ? matches[matches.length - 1][1] : ''
+      if (uuid) {
+        if (!firstUuid) firstUuid = uuid
+        uuids.add(uuid)
+      }
+    }
+    if (line.includes('"subtype":"compact_boundary"')) {
+      compactions++
+      repliesSinceCompact = 0
+    } else if (line.startsWith('{') && line.includes('"type":"assistant"')) {
+      repliesSinceCompact++
+    }
+    const branchAt = line.indexOf('"gitBranch":"')
+    if (branchAt !== -1) branch = line.slice(branchAt + 13, line.indexOf('"', branchAt + 13))
     if (
       !hasReply &&
       line.startsWith('{') &&
@@ -57,11 +83,24 @@ const summarize = file => {
     if (line.includes('"custom-title"')) {
       try {
         title = JSON.parse(line).customTitle || title
+        sessionTitle = title
         isCustomTitle = true
       } catch {}
     } else if (line.includes('"ai-title"')) {
       try {
         aiTitle = JSON.parse(line).aiTitle || aiTitle
+        aiTitles.add(aiTitle)
+      } catch {}
+    } else if (line.includes('"agent-name"')) {
+      // The agents view names a session by its agent-name; /rename sets only that.
+      // One that repeats an AI title was made by Claude Code, not by a rename.
+      try {
+        const named = JSON.parse(line).agentName
+        if (named && !aiTitles.has(named)) {
+          title = named
+          isCustomTitle = true
+        }
+        agentName = named || agentName
       } catch {}
     } else if (!preview && line.startsWith('{') && line.includes('"type":"user"')) {
       try {
@@ -77,7 +116,45 @@ const summarize = file => {
     isCustomTitle,
     preview: clean(preview).slice(0, 160),
     isEmpty: !hasReply && !preview,
+    sessionTitle: clean(sessionTitle),
+    agentName: clean(agentName),
+    branch,
+    compactions,
+    // Compacted counts only while nothing was said after the last compaction.
+    isCompacted: compactions > 0 && repliesSinceCompact === 0,
+    firstUuid,
+    uuids,
   }
+}
+
+// Claude Code writes ~/.claude/sessions/<pid>.json for each running session.
+// Resuming a session that another process holds forks it to a new id.
+const liveSessions = () => {
+  const live = new Map()
+  const dir = path.join(configDir, 'sessions')
+  let names
+  try {
+    names = fs.readdirSync(dir)
+  } catch {
+    return live
+  }
+  for (const name of names) {
+    if (!/^\d+\.json$/.test(name)) continue
+    try {
+      const entry = JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8'))
+      if (!entry.sessionId || !entry.pid) continue
+      process.kill(entry.pid, 0)
+      live.set(entry.sessionId, {
+        pid: entry.pid,
+        kind: entry.kind === 'bg' ? 'bg' : 'interactive',
+        status: String(entry.status || ''),
+        name: String(entry.name || ''),
+        // The agents list keeps an idle "spare" process ready for the next task.
+        spare: entry.spare === true,
+      })
+    } catch {}
+  }
+  return live
 }
 
 const findFile = id => {
@@ -113,9 +190,32 @@ const list = (currentId, root) => {
         file,
         size: stat.size,
         mtimeMs: stat.mtimeMs,
+        birthMs: stat.birthtimeMs || stat.ctimeMs,
         ...summarize(file),
       })
     }
+  }
+  const live = liveSessions()
+  for (let index = sessions.length - 1; index >= 0; index--) {
+    const running = live.get(sessions[index].id)
+    if (running && running.spare) sessions.splice(index, 1)
+  }
+  for (const session of sessions) {
+    const running = live.get(session.id)
+    if (running) session.live = { pid: running.pid, kind: running.kind, status: running.status, name: running.name }
+    if (!session.firstUuid) continue
+    const original = sessions
+      .filter(other => other !== session && other.birthMs < session.birthMs && other.uuids.has(session.firstUuid))
+      .sort((a, b) => a.birthMs - b.birthMs)[0]
+    if (original) {
+      session.copyOf = original.id
+      session.newMessages = [...session.uuids].filter(uuid => !original.uuids.has(uuid)).length
+    }
+  }
+  for (const session of sessions) {
+    delete session.uuids
+    delete session.firstUuid
+    delete session.birthMs
   }
   sessions.sort((a, b) => b.mtimeMs - a.mtimeMs)
   return sessions
@@ -341,8 +441,24 @@ const rename = (file, title) => {
   const name = clean(title)
   if (!name) throw new Error('empty title')
   const id = path.basename(file, '.jsonl')
-  appendRows(file, [{ type: 'custom-title', customTitle: name, sessionId: id }])
+  appendRows(file, [
+    { type: 'custom-title', customTitle: name, sessionId: id },
+    { type: 'agent-name', agentName: name, sessionId: id },
+  ])
   return { ok: true, title: name }
+}
+
+// Brings /resume's name (custom-title) and the agents view's (agent-name) to
+// the newest one. Only the custom-title is written: a running session keeps
+// its agent name in memory, so the caller runs /rename for that side.
+const syncName = id => {
+  const found = findFile(id)
+  if (!found) return { title: '', agentName: '' }
+  const { title, isCustomTitle, sessionTitle, agentName } = summarize(found.file)
+  if (isCustomTitle && title && title !== sessionTitle) {
+    appendRows(found.file, [{ type: 'custom-title', customTitle: title, sessionId: id }])
+  }
+  return { title: isCustomTitle ? title : '', agentName }
 }
 
 const remove = file => {
@@ -362,6 +478,7 @@ const main = () => {
   if (command === 'compact') {
     return JSON.stringify(compact(assertSessionFile(args[0]), fs.readFileSync(0, 'utf8')))
   }
+  if (command === 'sync-name') return JSON.stringify(syncName(args[0] || ''))
   if (command === 'rename') return JSON.stringify(rename(assertSessionFile(args[0]), args[1] || ''))
   if (command === 'join-new') {
     const [title, ...files] = args

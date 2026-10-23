@@ -13,7 +13,7 @@ const busy = atom({ plugin: 'session-manager', key: 'busy' } as const, null)
 const message = atom({ plugin: 'session-manager', key: 'message' } as const, null)
 const summaries = atom({ plugin: 'session-manager', key: 'summaries' } as const, {})
 const marked = atom({ plugin: 'session-manager', key: 'marked' } as const, [])
-const confirmEmpty = atom({ plugin: 'session-manager', key: 'confirmEmpty' } as const, false)
+const confirmCopies = atom({ plugin: 'session-manager', key: 'confirmCopies' } as const, false)
 
 const COMPACT_SYSTEM =
   'You summarize a coding conversation between a user and Claude Code so the work can continue ' +
@@ -60,6 +60,16 @@ const helper = async ($: EngineInterface, args: string[], stdin?: string) => {
   return ran.stdout
 }
 
+// One name for the session in /resume and in the agents view. A resume keeps
+// the agent name the window had, so this renames the agent to the session's.
+const syncName = async ($: EngineInterface) => {
+  const id = await $.session.id()
+  const names = JSON.parse(await helper($, ['sync-name', id])) as { title: string; agentName: string }
+  if (names.title !== '' && names.title !== names.agentName) {
+    await $.command.run({ command: 'rename', args: names.title })
+  }
+}
+
 const describeError = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
 const refresh = async ($: EngineInterface) => {
@@ -67,6 +77,20 @@ const refresh = async ($: EngineInterface) => {
   const root = await $.session.root()
   const list = JSON.parse(await helper($, ['list', currentId, root])) as SessionInfo[]
   await update($, sessions, () => list)
+}
+
+// Empty sessions (only a title or commands, left by restarts and /clear) are
+// deleted whenever the pane loads; the current one and any open one are kept.
+const deleteEmpty = async ($: EngineInterface) => {
+  const currentId = await $.session.id()
+  const list = await read($, sessions)
+  const empties = list.filter(session => session.isEmpty && session.id !== currentId && session.live === undefined)
+  for (const session of empties) {
+    await helper($, ['delete', session.file])
+    await $.store.delete(`summary:${session.id}`)
+  }
+  if (empties.length > 0) await refresh($)
+  return empties.length
 }
 
 const run = async ($: EngineInterface, label: string, work: () => Promise<string>) => {
@@ -116,7 +140,20 @@ export const register: Register = on => {
       description: 'Browse saved sessions: resume, recap, rename, compact, join or delete them',
     })
 
-    return next(e)
+    const started = await next(e)
+    await syncName($).catch(() => undefined)
+    // Open beside the chat from the start; unfocused, so typing stays in the prompt.
+    if (e.isInteractive) {
+      const opened = await $.ui
+        .open({ id: PANE, title: TITLE, closeOnEscape: true })
+        .catch(() => undefined)
+      if (opened?.isPlaced) {
+        await refresh($)
+          .then(() => deleteEmpty($))
+          .catch(() => undefined)
+      }
+    }
+    return started
   })
 
   on('command.run', { command: 'sessions' }, async $ => {
@@ -129,10 +166,12 @@ export const register: Register = on => {
     if (!opened.isPlaced) return { text: `Sessions pane not shown: ${opened.reason}` }
     await run($, 'Loading sessions…', async () => {
       await refresh($)
-      return ''
+      const removed = await deleteEmpty($)
+      return removed > 0 ? `Deleted ${removed} empty sessions.` : ''
     })
 
-    return { text: 'Sessions pane opened. If keys type into the chat, press ctrl+x then tab to focus it.' }
+    // The pane is the output; no transcript line.
+    return {}
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
@@ -151,6 +190,7 @@ export const register: Register = on => {
     const isFullscreen = e.viewport?.isFullscreen === true
     const picked = list.find(session => session.id === pickedId)
     const recap = picked === undefined ? undefined : recaps[picked.id]
+    const original = list.find(session => session.id === picked?.copyOf)
     const recapLines = recap === undefined ? 0 : recap.text.split('\n').length
     const markedIds = await read($, marked)
     const marks = list.filter(session => markedIds.includes(session.id))
@@ -159,8 +199,13 @@ export const register: Register = on => {
       3,
       e.props.scroll.bodyRows - (picked ? 18 + recapLines : 9) - joinLines,
     )
+    // Empty sessions stay out of the list, as in /resume; loading the pane deletes them.
+    const shown = list.filter(session => !session.isEmpty || session.id === currentId || session.id === pickedId)
+    const rows = Math.max(1, Math.floor(room / 2))
+    // Another process holds it: resuming forks a copy and edits race its writes.
+    const pickedIsOpen = picked !== undefined && picked.id !== currentId && picked.live !== undefined
     const intoTarget =
-      picked !== undefined && picked.id !== currentId && !markedIds.includes(picked.id)
+      picked !== undefined && picked.id !== currentId && !pickedIsOpen && !markedIds.includes(picked.id)
         ? picked
         : undefined
 
@@ -197,6 +242,10 @@ export const register: Register = on => {
     const renameTo = (session: SessionInfo) => (value: string) =>
       run($, 'Renaming…', async () => {
         await helper($, ['rename', session.file, value])
+        // A running session holds its agent name in memory; /rename updates it.
+        if (session.id === (await $.session.id())) {
+          await $.command.run({ command: 'rename', args: value.trim() })
+        }
         await refresh($)
         return `Renamed to "${value.trim()}".`
       })
@@ -237,10 +286,41 @@ export const register: Register = on => {
       try {
         await $.ui.close({ id: PANE })
         await $.command.run({ command: 'resume', args: session.id })
+        // A resume fires no session.start and keeps the window's agent name,
+        // so once the switch lands, name the agent after the session.
+        for (let tries = 0; tries < 20; tries++) {
+          if ((await $.session.id()) === session.id) {
+            if (session.title !== '') await $.command.run({ command: 'rename', args: session.title })
+            break
+          }
+          await $.clock.sleep(250)
+        }
       } catch (error) {
         await update($, message, () => `Failed: ${describeError(error)}`)
       }
     }
+
+    // A background agent under the same id: it shows in the agents view and
+    // leaves this window's session alone.
+    const openAsAgent = (session: SessionInfo) => () =>
+      run($, `Opening ${nameOf(session)} as an agent…`, async () => {
+        const ran = await $.process.run(
+          ['claude', '--bg', '--resume', session.id, '--name', nameOf(session)],
+          { cwd: await $.session.root(), timeoutMs: 60000 },
+        )
+        if (ran.exitCode !== 0) throw new Error(ran.stderr.trim() || `claude exited ${ran.exitCode}`)
+        await refresh($)
+        return `Opened "${nameOf(session)}" as a background agent: find it in the agents view.`
+      })
+
+    // Resuming here drops this window's conversation, so it is offered only
+    // while that is empty (a new session not yet written counts too).
+    // Inside the agents view this pane runs in a background agent; the terminal
+    // under it is an interactive process holding the session it started with.
+    const inAgentView = list.find(session => session.id === currentId)?.live?.kind === 'bg'
+    const isHost = (session: SessionInfo) => inAgentView && session.live?.kind === 'interactive'
+
+    const hereIsEmpty = list.find(session => session.id === currentId)?.isEmpty ?? true
 
     const toggleMark = (session: SessionInfo) => () =>
       update($, marked, current =>
@@ -300,28 +380,56 @@ export const register: Register = on => {
         return `Joined into ${nameOf(target)} (backup saved as .jsonl.bak).`
       })
 
-    const empties = list.filter(session => session.isEmpty && session.id !== currentId)
-    const clearingEmpty = await read($, confirmEmpty)
+    const deleteAll = async (doomed: SessionInfo[]) => {
+      for (const session of doomed) {
+        await helper($, ['delete', session.file])
+        await $.store.delete(`summary:${session.id}`)
+      }
+      const gone = doomed.map(session => session.id)
+      await update($, marked, current => current.filter(id => !gone.includes(id)))
+      await update($, selected, current => (current !== null && gone.includes(current) ? null : current))
+      await refresh($)
+    }
 
-    const askDeleteEmpty = () => update($, confirmEmpty, () => true)
+    // Copies made by resuming a session while it was open elsewhere.
+    const copies = list.filter(
+      session => session.copyOf !== undefined && session.id !== currentId && session.live === undefined,
+    )
+    const withWork = copies.filter(session => (session.newMessages ?? 0) > 0).length
+    const clearingCopies = await read($, confirmCopies)
 
-    const cancelDeleteEmpty = () => update($, confirmEmpty, () => false)
+    const askDeleteCopies = () => update($, confirmCopies, () => true)
 
-    const deleteEmptyNow = () =>
-      run($, `Deleting ${empties.length} empty sessions…`, async () => {
-        await update($, confirmEmpty, () => false)
-        for (const session of empties) {
-          await helper($, ['delete', session.file])
-          await $.store.delete(`summary:${session.id}`)
-        }
-        const gone = empties.map(session => session.id)
-        await update($, marked, current => current.filter(id => !gone.includes(id)))
-        await update($, selected, current => (current !== null && gone.includes(current) ? null : current))
-        await refresh($)
-        return `Deleted ${gone.length} empty sessions.`
+    const cancelDeleteCopies = () => update($, confirmCopies, () => false)
+
+    const deleteCopiesNow = () =>
+      run($, `Deleting ${copies.length} copies…`, async () => {
+        await update($, confirmCopies, () => false)
+        await deleteAll(copies)
+        return `Deleted ${copies.length} copies.`
       })
 
     const totalBytes = list.reduce((sum, session) => sum + session.size, 0)
+
+    // The footer names only the keys that do something right now.
+    const canAct = picked !== undefined && picked.id !== currentId && !pickedIsOpen
+    const keys = [
+      'r refresh',
+      ...(picked === undefined
+        ? []
+        : [
+            ...(canAct ? ['o open as agent'] : []),
+            ...(canAct && hereIsEmpty ? ['h resume here'] : []),
+            's recap',
+            'm mark',
+            ...(canAct ? ['c compact', 'd delete'] : []),
+          ]),
+      ...(marks.length >= 2 ? ['n join new'] : []),
+      ...(marks.length > 0 && intoTarget !== undefined ? ['i join into'] : []),
+      ...(marks.length > 0 ? ['x clear marks'] : []),
+      ...(copies.length > 0 ? ['p delete copies'] : []),
+      'esc close',
+    ]
 
     return (
       <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
@@ -340,27 +448,34 @@ export const register: Register = on => {
             </Button>
           </Box>
         </Box>
-        {empties.length > 0 && working === null && (
-          <Box flexDirection="row" gap={1}>
-            {clearingEmpty ? (
-              <>
-                <Text color="red" bold>
-                  Delete {empties.length} empty sessions permanently?
-                </Text>
-                <Button key="empty-yes" onPress={deleteEmptyNow}>
-                  Yes, delete
-                </Button>
-                <Button key="empty-no" onPress={cancelDeleteEmpty}>
-                  Cancel
-                </Button>
-              </>
-            ) : (
-              <>
-                <Text dimColor>{empties.length} empty (no conversation)</Text>
-                <Button key="empty" hotkey="e" onPress={askDeleteEmpty}>
-                  Delete empty
-                </Button>
-              </>
+        {copies.length > 0 && working === null && (
+          <Box flexDirection="column">
+            <Box flexDirection="row" gap={1}>
+              {clearingCopies ? (
+                <>
+                  <Text color="red" bold>
+                    Delete {copies.length} copies permanently?
+                  </Text>
+                  <Button key="copies-yes" onPress={deleteCopiesNow}>
+                    Yes, delete
+                  </Button>
+                  <Button key="copies-no" onPress={cancelDeleteCopies}>
+                    Cancel
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Text dimColor>{copies.length} copies (from resuming open sessions)</Text>
+                  <Button key="copies" hotkey="p" onPress={askDeleteCopies}>
+                    Delete copies
+                  </Button>
+                </>
+              )}
+            </Box>
+            {clearingCopies && withWork > 0 && (
+              <Text color="yellow">
+                {withWork} of them have messages their original lacks: that work goes too.
+              </Text>
             )}
           </Box>
         )}
@@ -372,34 +487,45 @@ export const register: Register = on => {
           </Text>
         )}
         <Box flexDirection="column" marginTop={1}>
-          {list.length === 0 && working === null && <Text dimColor>No sessions found.</Text>}
-          {list.slice(0, room).map(session => {
+          {shown.length === 0 && working === null && <Text dimColor>No sessions found.</Text>}
+          {shown.slice(0, rows).map(session => {
             const isCurrent = session.id === currentId
             const isPicked = session.id === pickedId
             const isMarked = markedIds.includes(session.id)
-            const age = formatAge(now - session.mtimeMs)
-            const size = formatSize(session.size)
-            const tail = isCurrent ? ' · current' : ''
-            const label = fit(nameOf(session), Math.max(10, width - size.length - age.length - tail.length - 8))
+            const label = fit(nameOf(session), Math.max(10, width - 4))
 
+            // Two lines like /resume: the name, then age · branch · size.
             return (
-              <Button key={`row-${session.id}`} plain onPress={pick(session)}>
-                <Text color={isPicked ? 'magenta' : isCurrent ? 'green' : 'cyan'}>
-                  {isPicked ? '▸ ' : isCurrent ? '● ' : '  '}
-                </Text>
-                <Text color="yellow">{isMarked ? '✓ ' : ''}</Text>
-                <Text bold={isPicked} color={isPicked ? 'magenta' : undefined}>
-                  {label}
-                </Text>{' '}
-                <Text color={sizeColor(session.size)} dimColor={sizeColor(session.size) === undefined}>
-                  {size}
-                </Text>
-                <Text dimColor> · {age}</Text>
-                {isCurrent && <Text color="green"> · current</Text>}
-              </Button>
+              <Box key={`row-${session.id}`} flexDirection="column">
+                <Button key={`row-${session.id}`} plain onPress={pick(session)}>
+                  <Text color={isPicked ? 'magenta' : isCurrent ? 'green' : 'cyan'}>
+                    {isPicked ? '▸ ' : isCurrent ? '● ' : '  '}
+                  </Text>
+                  <Text color="yellow">{isMarked ? '✓ ' : ''}</Text>
+                  <Text bold={isPicked} color={isPicked ? 'magenta' : undefined}>
+                    {label}
+                  </Text>
+                </Button>
+                <Button key={`meta-${session.id}`} plain onPress={pick(session)}>
+                  <Text dimColor>
+                    {'  '}
+                    {formatAge(now - session.mtimeMs)}
+                    {session.branch === '' ? '' : ` · ${session.branch}`} ·{' '}
+                  </Text>
+                  <Text color={sizeColor(session.size)} dimColor={sizeColor(session.size) === undefined}>
+                    {formatSize(session.size)}
+                  </Text>
+                  {isCurrent && <Text color="green"> · current</Text>}
+                  {!isCurrent && session.live !== undefined && (
+                    <Text color="yellow">{isHost(session) ? ' · this window' : ' · open'}</Text>
+                  )}
+                  {session.copyOf !== undefined && <Text dimColor> · copy</Text>}
+                  {session.isCompacted && <Text color="blue"> · ⇣ compacted</Text>}
+                </Button>
+              </Box>
             )
           })}
-          {list.length > room && <Text dimColor>  …and {list.length - room} more</Text>}
+          {shown.length > rows && <Text dimColor>  …and {shown.length - rows} more</Text>}
         </Box>
         {marks.length > 0 && (
           <Box flexDirection="column" marginTop={1}>
@@ -440,10 +566,33 @@ export const register: Register = on => {
             <Text>
               <Text color={sizeColor(picked.size)}>{formatSize(picked.size)}</Text>
               <Text dimColor> · last active {formatAge(now - picked.mtimeMs)}</Text>
+              {picked.isCompacted ? (
+                <Text color="blue"> · ⇣ compacted: nothing added since</Text>
+              ) : (
+                picked.compactions > 0 && <Text dimColor> · compacted before, more added since</Text>
+              )}
             </Text>
             {picked.preview !== '' && (
               <Text italic dimColor>
                 {fit(`“${picked.preview}”`, width - 4)}
+              </Text>
+            )}
+            {pickedIsOpen && picked.live !== undefined && (
+              <Text color="yellow">
+                {picked.live.kind === 'bg'
+                  ? `Running as a background agent (${picked.live.status || 'idle'}). Open it from the agents list.`
+                  : isHost(picked)
+                    ? `The session this terminal started with (process ${picked.live.pid}). It stays held under the agents view and frees when you close the terminal.`
+                    : `Open in a Claude Code window${picked.live.name === '' ? '' : ` named "${picked.live.name}"`} (process ${picked.live.pid}).`}{' '}
+                Resuming it here would fork a copy, so Resume, Compact and Delete are off. To delete it, exit that window (/exit), then press r and d.
+              </Text>
+            )}
+            {picked.copyOf !== undefined && (
+              <Text dimColor>
+                {fit(
+                  `Copy of ${original === undefined ? picked.copyOf.slice(0, 8) : nameOf(original)}, made by resuming it while it was open.`,
+                  (width - 4) * 2,
+                )}
               </Text>
             )}
             <Box flexDirection="column" marginTop={1}>
@@ -468,9 +617,14 @@ export const register: Register = on => {
               </Box>
             )}
             <Box flexDirection="row" gap={1} marginTop={1}>
-              {picked.id !== currentId && (
-                <Button key="resume" hotkey="o" variant="primary" onPress={resumeNow(picked)}>
-                  Resume
+              {picked.id !== currentId && !pickedIsOpen && (
+                <Button key="open-agent" hotkey="o" variant="primary" onPress={openAsAgent(picked)}>
+                  Open as agent
+                </Button>
+              )}
+              {picked.id !== currentId && !pickedIsOpen && hereIsEmpty && (
+                <Button key="resume" hotkey="h" onPress={resumeNow(picked)}>
+                  Resume here
                 </Button>
               )}
               <Button key="recap" hotkey="s" onPress={summarize(picked)}>
@@ -481,7 +635,7 @@ export const register: Register = on => {
               </Button>
               {picked.id === currentId ? (
                 <Text dimColor>Current session: use /compact or /rename here.</Text>
-              ) : deleting === picked.id ? (
+              ) : pickedIsOpen ? null : deleting === picked.id ? (
                 <>
                   <Text color="red" bold>
                     Delete permanently?
@@ -515,7 +669,7 @@ export const register: Register = on => {
           <Text color="yellow">Click here (or ctrl+x then tab) to use this pane's keys.</Text>
         )}
         <Text dimColor>
-          r refresh · o resume · s recap · m mark · n join new · i join into · c compact · d delete · e delete empty · esc close
+          {keys.join(' · ')}
         </Text>
       </Box>
     )
